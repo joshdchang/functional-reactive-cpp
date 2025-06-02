@@ -1,9 +1,0 @@
-{
-  "files.associations": {
-    ".env*": "dotenv",
-    "*.css": "tailwindcss",
-    "cstdint": "cpp",
-    "initializer_list": "cpp",
-    "stdexcept": "cpp"
-  }
-}

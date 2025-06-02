@@ -1,6 +1,6 @@
 {
   "dependencies": [
-    "fmt",
-    "sdl3"
+    "sdl3",
+    "sdl3-ttf"
   ]
 }
