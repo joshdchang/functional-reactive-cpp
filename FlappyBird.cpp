@@ -35,17 +35,17 @@ enum class GameStatus { MainMenu, Playing, GameOver };
 //------------------------------------------------------------------------------
 // Bird Component
 //------------------------------------------------------------------------------
-NodePtr Bird(State<GameStatus> gameStatusProp, State<SDL_FRect> birdRect) {
+NodePtr Bird(State<GameStatus> gameStatus, State<SDL_FRect> birdRect) {
     auto node = std::make_shared<Node>();
 
     auto yPosState = useState<float>(*node, WINDOW_HEIGHT / 2.0f);
     auto yVelState = useState<float>(*node, 0.0f);
     auto rotationState = useState<float>(*node, 0.0f);
 
-    useEvent(*node, [yVelState, gameStatusProp](SDL_Event* e) mutable {
+    useEvent(*node, [yVelState, gameStatus](SDL_Event* e) mutable {
         if (e->type == SDL_EVENT_KEY_DOWN) {
             if (e->key.scancode == SDL_SCANCODE_SPACE || e->key.scancode == SDL_SCANCODE_UP) {
-                GameStatus currentStatus = gameStatusProp.get();
+                GameStatus currentStatus = gameStatus.get();
                 if (currentStatus == GameStatus::Playing) {
                     yVelState.set(FLAP_VELOCITY);
                 }
@@ -53,10 +53,31 @@ NodePtr Bird(State<GameStatus> gameStatusProp, State<SDL_FRect> birdRect) {
         }
     });
 
+    useEffect(
+        *node,
+        [yPosState, yVelState, rotationState, gameStatus, birdRect]() mutable {
+            GameStatus currentStatus = gameStatus.get();
+            if (currentStatus == GameStatus::MainMenu || currentStatus == GameStatus::GameOver) {
+                // Reset bird position and physics for MainMenu or GameOver
+                float initialYPos = WINDOW_HEIGHT / 2.0f;
+                yPosState.set(initialYPos);
+                yVelState.set(0.0f);
+                rotationState.set(0.0f);
+                birdRect.set({
+                    BIRD_X_POSITION - BIRD_WIDTH / 2,
+                    initialYPos - BIRD_HEIGHT / 2,
+                    BIRD_WIDTH,
+                    BIRD_HEIGHT,
+                });
+            }
+        },
+        gameStatus  // Dependency: run this effect when gameStatus changes
+    );
+
     useUpdate(
         *node,
-        [yPosState, yVelState, rotationState, gameStatusProp, birdRect](double dt) mutable {
-            GameStatus currentStatus = gameStatusProp.get();
+        [yPosState, yVelState, rotationState, gameStatus, birdRect](double dt) mutable {
+            GameStatus currentStatus = gameStatus.get();
 
             if (currentStatus == GameStatus::Playing) {
                 float yVel = yVelState.get();
@@ -88,25 +109,8 @@ NodePtr Bird(State<GameStatus> gameStatusProp, State<SDL_FRect> birdRect) {
 
                 // Check bounds
                 if (yPos + BIRD_HEIGHT / 2 > WINDOW_HEIGHT || yPos - BIRD_HEIGHT / 2 < 0) {
-                    if (currentStatus == GameStatus::Playing) {
-                        gameStatusProp.set(GameStatus::GameOver);
-                    }
+                    gameStatus.set(GameStatus::GameOver);
                 }
-            } else if (currentStatus == GameStatus::MainMenu ||
-                       currentStatus == GameStatus::GameOver) {
-                // Reset bird position and physics for MainMenu or GameOver
-                float initialYPos = WINDOW_HEIGHT / 2.0f;
-                yPosState.set(initialYPos);
-                yVelState.set(0.0f);
-                rotationState.set(0.0f);
-                birdRect.set(
-                    {// Update the shared birdRect state
-                     BIRD_X_POSITION - BIRD_WIDTH / 2,
-                     initialYPos - BIRD_HEIGHT / 2,
-                     BIRD_WIDTH,
-                     BIRD_HEIGHT
-                    }
-                );
             }
         }
     );
@@ -370,54 +374,59 @@ NodePtr Game(TTF_Font* font) {
         }
     });
 
-    // --- UI Text Elements ---
+    // UI Text Elements
     SDL_Color textColor = {0, 0, 0, 255};                     // Black text
     SDL_FPoint scorePosition = {WINDOW_WIDTH / 2.0f, 50.0f};  // Fixed position for score
 
-    // Create children by passing the states
-    auto birdNode = Bird(status, birdRect);
-    auto pipeManagerNode = PipeManager(status, birdRect, score);
-
     node->SetChildren({
-        birdNode,
-        pipeManagerNode,
-        Text(
-            font,
-            textColor,
-            [status, score]() -> std::string {
-                if (status.get() == GameStatus::MainMenu) {
-                    return "Flap to Start";
-                } else if (status.get() == GameStatus::GameOver) {
-                    return "Game Over! Score: " + std::to_string(score.get()) + ".";
-                }
-                return "";
-            },
-            [status]() -> SDL_FPoint {  // Position provider
-                if (status.get() == GameStatus::GameOver) {
-                    return {WINDOW_WIDTH / 2.0f, WINDOW_HEIGHT / 2.0f - 25.0f};
-                }
-                // Default position for main menu message
-                return {WINDOW_WIDTH / 2.0f, 100.0f};
-            },
-            [status]() -> bool {  // Visibility provider
-                return status.get() == GameStatus::MainMenu || status.get() == GameStatus::GameOver;
-            }
+        Conditional(
+            useComputed<bool>(
+                *node,
+                [status]() -> bool { return status.get() != GameStatus::GameOver; },
+                status
+            ),
+            Fragment({
+                PipeManager(status, birdRect, score),
+                Bird(status, birdRect),
+            })
         ),
-        Text(
-            font,
-            textColor,
-            [status, score]() -> std::string {  // Text provider
-                if (status.get() == GameStatus::Playing) {
+        Conditional(
+            useComputed<bool>(
+                *node,
+                [status]() -> bool { return status.get() == GameStatus::MainMenu; },
+                status
+            ),
+            Text(font, textColor, "Flap to Start", SDL_FPoint{WINDOW_WIDTH / 2.0f, 100.0f})
+        ),
+        Conditional(
+            useComputed<bool>(
+                *node,
+                [status]() -> bool { return status.get() == GameStatus::GameOver; },
+                status
+            ),
+            Text(
+                font,
+                textColor,
+                [score]() -> std::string {  // Text can still be dynamic
+                    return "Game Over! Score: " + std::to_string(score.get()) + ".";
+                },
+                SDL_FPoint{WINDOW_WIDTH / 2.0f, WINDOW_HEIGHT / 2.0f - 25.0f}
+            )
+        ),
+        Conditional(
+            useComputed<bool>(
+                *node,
+                [status]() -> bool { return status.get() == GameStatus::Playing; },
+                status
+            ),
+            Text(
+                font,
+                textColor,
+                [score]() -> std::string {  // Text can still be dynamic
                     return "Score: " + std::to_string(score.get());
-                }
-                return "";  // Don't show score text if not playing or game over
-            },
-            [scorePosition]() -> SDL_FPoint {  // Position provider (fixed for score)
-                return scorePosition;
-            },
-            [status]() -> bool {  // Visibility provider
-                return status.get() == GameStatus::Playing;
-            }
+                },
+                scorePosition
+            )
         ),
     });
 

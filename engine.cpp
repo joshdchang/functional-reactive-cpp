@@ -12,6 +12,10 @@ void updateTree(const NodePtr& node, double dt) {
     for (auto& fn : node->hookData.updateEffects) {
         fn(dt);
     }
+    // Run useEffect hooks for the current node
+    for (auto& effectHook : node->hookData.effects) {
+        effectHook.runIfChanged();
+    }
     // Recursively update children
     for (auto& child : node->children) {
         updateTree(child, dt);
