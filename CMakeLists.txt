@@ -1,14 +1,9 @@
-cmake_minimum_required(VERSION 3.16)
-project(functional-reactive-cpp LANGUAGES CXX)
+cmake_minimum_required(VERSION 3.10)
 
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
+project(HelloWorld)
 
-add_library(functional-reactive-cpp src/foo.cpp)
-target_include_directories(functional-reactive-cpp PUBLIC ${PROJECT_SOURCE_DIR}/include)
+find_package(fmt CONFIG REQUIRED)
 
-add_executable(functional-reactive-cpp_exe src/main.cpp)
-target_link_libraries(functional-reactive-cpp_exe PRIVATE functional-reactive-cpp)
+add_executable(HelloWorld helloworld.cpp)
 
-enable_testing()
-add_subdirectory(tests)
+target_link_libraries(HelloWorld PRIVATE fmt::fmt)
