@@ -31,3 +31,17 @@ void renderTree(const NodePtr& node, SDL_Renderer* renderer) {
         renderTree(child, renderer);
     }
 }
+
+void eventTree(const NodePtr& node, SDL_Event* event) {
+    if (!node || !event) {
+        return;
+    }
+    // Run event effects for the current node
+    for (auto& fn : node->hookData.eventEffects) {
+        fn(event);
+    }
+    // Recursively process events for children
+    for (auto& child : node->children) {
+        eventTree(child, event);
+    }
+}

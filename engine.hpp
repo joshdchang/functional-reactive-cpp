@@ -11,6 +11,9 @@
 #include <typeindex>
 #include <utility>
 #include <vector>
+#include <optional> // Required for std::optional
+#include <variant>  // Required for std::variant
+#include <stdexcept> // Required for std::runtime_error
 
 //------------------------------------------------------------------------------
 // Engine Forward Declarations & Type Aliases
@@ -41,6 +44,7 @@ struct HookData {
     std::vector<std::shared_ptr<BaseStateSlot>> stateSlots;
     std::vector<std::function<void(double)>> updateEffects;
     std::vector<std::function<void(SDL_Renderer*)>> renderEffects;
+    std::vector<std::function<void(SDL_Event*)>> eventEffects; // Add this line
 };
 
 //------------------------------------------------------------------------------
@@ -66,6 +70,25 @@ struct Node {
         if (child) {
             children.push_back(child);
             child->parent = this;
+        }
+    }
+
+    void SetChildren(std::initializer_list<NodePtr> newChildrenList) {
+        // Unparent old children
+        for (NodePtr& oldChild : children) {
+            if (oldChild) {
+                oldChild->parent = nullptr;
+            }
+        }
+        children.clear();  // Clear the existing list
+
+        // Add new children from the initializer_list
+        children.reserve(newChildrenList.size());
+        for (const NodePtr& child_ptr : newChildrenList) {
+            if (child_ptr) {  // Check if child_ptr is not null
+                children.push_back(child_ptr);
+                child_ptr->parent = this;
+            }
         }
     }
 
@@ -155,6 +178,34 @@ inline void useRender(Node& node, const std::function<void(SDL_Renderer*)>& fn) 
     node.hookData.renderEffects.push_back(fn);
 }
 
+inline void useEvent(Node& node, const std::function<void(SDL_Event*)>& fn) {
+    node.hookData.eventEffects.push_back(fn);
+}
+
+//------------------------------------------------------------------------------
+// Prop System (New)
+//------------------------------------------------------------------------------
+template <typename T>
+using Prop = std::variant<T, State<T>, std::function<T()>>;
+
+template <typename T>
+T getVal(const Prop<T>& prop) {
+    if (std::holds_alternative<T>(prop)) {
+        return std::get<T>(prop);
+    } else if (std::holds_alternative<State<T>>(prop)) {
+        const auto& state = std::get<State<T>>(prop);
+        if (state.isValid()) {
+            return state.get();
+        }
+    } else if (std::holds_alternative<std::function<T()>>(prop)) {
+        const auto& func = std::get<std::function<T()>>(prop);
+        if (func) { // Check if std::function is not empty (null)
+            return func();
+        }
+    }
+    throw std::runtime_error("Invalid Prop<T> state or uninitialized provider");
+}
+
 //------------------------------------------------------------------------------
 // Context API
 //------------------------------------------------------------------------------
@@ -174,3 +225,4 @@ struct Context {
 //------------------------------------------------------------------------------
 void updateTree(const NodePtr& node, double dt);
 void renderTree(const NodePtr& node, SDL_Renderer* renderer);
+void eventTree(const NodePtr& node, SDL_Event* event);
