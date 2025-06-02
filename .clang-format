@@ -1,0 +1,15 @@
+BasedOnStyle: Chromium
+ColumnLimit: 100
+InsertBraces: true
+AllowShortFunctionsOnASingleLine: false
+PointerAlignment: Left
+AlignOperands: true
+BreakConstructorInitializers: BeforeComma
+ExperimentalAutoDetectBinPacking: true
+IndentWidth: 4
+BinPackParameters: false
+BinPackArguments: false
+AllowAllArgumentsOnNextLine: false
+AllowAllParametersOfDeclarationOnNextLine: false
+PenaltyBreakBeforeFirstCallParameter: 0
+AlignAfterOpenBracket: BlockIndent
