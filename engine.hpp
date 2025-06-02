@@ -14,6 +14,12 @@
 #include <optional> // Required for std::optional
 #include <variant>  // Required for std::variant
 #include <stdexcept> // Required for std::runtime_error
+#include <algorithm>   // For std::remove
+#include <deque>       // For managing pipes
+#include <functional>  // For std::function
+#include <iostream>
+#include <random>  // For pipe heights
+#include <string>  // For std::string and std::to_string
 
 //------------------------------------------------------------------------------
 // Engine Forward Declarations & Type Aliases
