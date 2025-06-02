@@ -2,24 +2,24 @@
 
 #include <SDL3/SDL_render.h>  // For SDL_Renderer* in useRender
 
+#include <algorithm>  // For std::remove
 #include <any>
+#include <deque>  // For managing pipes
 #include <functional>
+#include <functional>  // For std::function
 #include <initializer_list>
+#include <iostream>
 #include <map>
 #include <memory>
+#include <optional>   // Required for std::optional
+#include <random>     // For pipe heights
+#include <stdexcept>  // Required for std::runtime_error
 #include <string>
+#include <string>  // For std::string and std::to_string
 #include <typeindex>
 #include <utility>
-#include <vector>
-#include <optional> // Required for std::optional
 #include <variant>  // Required for std::variant
-#include <stdexcept> // Required for std::runtime_error
-#include <algorithm>   // For std::remove
-#include <deque>       // For managing pipes
-#include <functional>  // For std::function
-#include <iostream>
-#include <random>  // For pipe heights
-#include <string>  // For std::string and std::to_string
+#include <vector>
 
 //------------------------------------------------------------------------------
 // Engine Forward Declarations & Type Aliases
@@ -50,7 +50,7 @@ struct HookData {
     std::vector<std::shared_ptr<BaseStateSlot>> stateSlots;
     std::vector<std::function<void(double)>> updateEffects;
     std::vector<std::function<void(SDL_Renderer*)>> renderEffects;
-    std::vector<std::function<void(SDL_Event*)>> eventEffects; // Add this line
+    std::vector<std::function<void(SDL_Event*)>> eventEffects;  // Add this line
 };
 
 //------------------------------------------------------------------------------
@@ -104,29 +104,6 @@ struct Node {
             if (auto typedSlotPtr = std::dynamic_pointer_cast<TypedStateSlot<T>>(baseSlotPtr)) {
                 return typedSlotPtr;
             }
-        }
-        return nullptr;
-    }
-
-    template <typename T>
-    void provideContext(const std::type_index& ctxTypeId, T* value) {
-        providedContextsMap[ctxTypeId] = value;
-    }
-
-    template <typename T>
-    T* getContextValue(const std::type_index& ctxTypeId) {
-        Node* currentNode = this;
-        while (currentNode) {
-            auto it = currentNode->providedContextsMap.find(ctxTypeId);
-            if (it != currentNode->providedContextsMap.end()) {
-                try {
-                    return std::any_cast<T*>(it->second);
-                } catch (const std::bad_any_cast& e) {
-                    // This could be an SDL_Log call
-                    return nullptr;
-                }
-            }
-            currentNode = currentNode->parent;
         }
         return nullptr;
     }
@@ -189,13 +166,13 @@ inline void useEvent(Node& node, const std::function<void(SDL_Event*)>& fn) {
 }
 
 //------------------------------------------------------------------------------
-// Prop System (New)
+// Generic Props
 //------------------------------------------------------------------------------
 template <typename T>
 using Prop = std::variant<T, State<T>, std::function<T()>>;
 
 template <typename T>
-T getVal(const Prop<T>& prop) {
+inline T val(const Prop<T>& prop) {
     if (std::holds_alternative<T>(prop)) {
         return std::get<T>(prop);
     } else if (std::holds_alternative<State<T>>(prop)) {
@@ -205,26 +182,12 @@ T getVal(const Prop<T>& prop) {
         }
     } else if (std::holds_alternative<std::function<T()>>(prop)) {
         const auto& func = std::get<std::function<T()>>(prop);
-        if (func) { // Check if std::function is not empty (null)
+        if (func) {
             return func();
         }
     }
     throw std::runtime_error("Invalid Prop<T> state or uninitialized provider");
 }
-
-//------------------------------------------------------------------------------
-// Context API
-//------------------------------------------------------------------------------
-template <typename T>
-struct Context {
-    std::type_index typeId;
-    T defaultValue;
-    Context(T defVal = T{}) : typeId(typeid(Context<T>)), defaultValue(std::move(defVal)) {
-    }
-};
-
-// Note: The original ContextProvider and useContext were not fully utilized or implemented.
-// The core functionality relies on provideContext and getContextValue directly in the Node.
 
 //------------------------------------------------------------------------------
 // Tree Traversal

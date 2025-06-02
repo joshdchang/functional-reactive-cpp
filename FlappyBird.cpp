@@ -35,27 +35,27 @@ enum class GameStatus { MainMenu, Playing, GameOver };
 //------------------------------------------------------------------------------
 // Bird Component
 //------------------------------------------------------------------------------
-NodePtr Bird(
-    State<GameStatus> gameStatusProp,
-    State<SDL_FRect> birdRectProp,  // Bird writes its rect here
-    State<bool> gameOverFlagProp,   // Bird sets this to true on collision/out of bounds
-    State<std::function<void()>>
-        setOnFlapRequestedProp  // Game provides this for Bird to set its flap action
-) {
+NodePtr Bird(State<GameStatus> gameStatusProp, State<SDL_FRect> birdRect) {
     auto node = std::make_shared<Node>();
 
     auto yPosState = useState<float>(*node, WINDOW_HEIGHT / 2.0f);
     auto yVelState = useState<float>(*node, 0.0f);
     auto rotationState = useState<float>(*node, 0.0f);
 
-    // Set the flap request callback. This is called once when Bird is created.
-    setOnFlapRequestedProp.set([yVelState]() mutable { yVelState.set(FLAP_VELOCITY); });
+    useEvent(*node, [yVelState, gameStatusProp](SDL_Event* e) mutable {
+        if (e->type == SDL_EVENT_KEY_DOWN) {
+            if (e->key.scancode == SDL_SCANCODE_SPACE || e->key.scancode == SDL_SCANCODE_UP) {
+                GameStatus currentStatus = gameStatusProp.get();
+                if (currentStatus == GameStatus::Playing) {
+                    yVelState.set(FLAP_VELOCITY);
+                }
+            }
+        }
+    });
 
     useUpdate(
         *node,
-        [yPosState, yVelState, rotationState, gameStatusProp, birdRectProp, gameOverFlagProp](
-            double dt
-        ) mutable {
+        [yPosState, yVelState, rotationState, gameStatusProp, birdRect](double dt) mutable {
             GameStatus currentStatus = gameStatusProp.get();
 
             if (currentStatus == GameStatus::Playing) {
@@ -77,7 +77,7 @@ NodePtr Bird(
                 }
                 rotationState.set(rotation);
 
-                birdRectProp.set(
+                birdRect.set(
                     {// Update the shared birdRect state
                      BIRD_X_POSITION - BIRD_WIDTH / 2,
                      yPos - BIRD_HEIGHT / 2,
@@ -88,9 +88,8 @@ NodePtr Bird(
 
                 // Check bounds
                 if (yPos + BIRD_HEIGHT / 2 > WINDOW_HEIGHT || yPos - BIRD_HEIGHT / 2 < 0) {
-                    if (currentStatus ==
-                        GameStatus::Playing) {  // Ensure we only set game over if playing
-                        gameOverFlagProp.set(true);
+                    if (currentStatus == GameStatus::Playing) {
+                        gameStatusProp.set(GameStatus::GameOver);
                     }
                 }
             } else if (currentStatus == GameStatus::MainMenu ||
@@ -100,7 +99,7 @@ NodePtr Bird(
                 yPosState.set(initialYPos);
                 yVelState.set(0.0f);
                 rotationState.set(0.0f);
-                birdRectProp.set(
+                birdRect.set(
                     {// Update the shared birdRect state
                      BIRD_X_POSITION - BIRD_WIDTH / 2,
                      initialYPos - BIRD_HEIGHT / 2,
@@ -144,7 +143,7 @@ struct PipeData {
 
 NodePtr PipePair(float initialX, float topPipeOpeningY) {
     auto node = std::make_shared<Node>();
-    auto pipeState = useState<PipeData>(
+    auto pipeData = useState<PipeData>(
         *node,
         {
             initialX,
@@ -165,8 +164,8 @@ NodePtr PipePair(float initialX, float topPipeOpeningY) {
         }
     );
 
-    useRender(*node, [pipeState](SDL_Renderer* renderer) {
-        PipeData data = pipeState.get();
+    useRender(*node, [pipeData](SDL_Renderer* renderer) {
+        PipeData data = pipeData.get();
         SDL_SetRenderDrawColor(renderer, 0, 255, 0, 255);  // Green pipes
         SDL_RenderFillRect(renderer, &data.topRect);
         SDL_RenderFillRect(renderer, &data.bottomRect);
@@ -178,10 +177,9 @@ NodePtr PipePair(float initialX, float topPipeOpeningY) {
 // Pipe Manager Component
 //------------------------------------------------------------------------------
 NodePtr PipeManager(
-    State<GameStatus> gameStatusProp,
-    State<SDL_FRect> birdRectProp,  // PipeManager reads this
-    State<int> scoreProp,           // PipeManager writes to this
-    State<bool> gameOverFlagProp    // PipeManager writes to this
+    State<GameStatus> gameStatus,
+    Prop<SDL_FRect> birdRect,  // PipeManager reads this
+    State<int> score
 ) {
     auto node = std::make_shared<Node>();
     auto activePipesState = useState<std::deque<NodePtr>>(*node, {});
@@ -198,11 +196,10 @@ NodePtr PipeManager(
          node_ptr = node.get(),
          distrib,
          gen,
-         gameStatusProp,
-         birdRectProp,
-         scoreProp,
-         gameOverFlagProp](double dt) mutable {
-            GameStatus currentStatus = gameStatusProp.get();
+         gameStatus,
+         birdRect,
+         score](double dt) mutable {
+            GameStatus currentStatus = gameStatus.get();
 
             if (currentStatus != GameStatus::Playing) {
                 // Clear pipes and reset spawn timer if not playing
@@ -229,7 +226,8 @@ NodePtr PipeManager(
             spawnTimerState.set(spawnTimer);
 
             auto& pipes = activePipesState.getRef();
-            SDL_FRect currentBirdRect = birdRectProp.get();  // Get current bird rect
+
+            auto currentBirdRect = val(birdRect);
 
             for (size_t i = 0; i < pipes.size(); ++i) {
                 NodePtr pipeNode = pipes[i];
@@ -248,14 +246,14 @@ NodePtr PipeManager(
                 if (SDL_HasRectIntersectionFloat(&currentBirdRect, &currentData.topRect) ||
                     SDL_HasRectIntersectionFloat(&currentBirdRect, &currentData.bottomRect)) {
                     if (currentStatus == GameStatus::Playing) {  // Should be true here
-                        gameOverFlagProp.set(true);
+                        gameStatus.set(GameStatus::GameOver);
                     }
                 }
 
                 // Score Check
                 if (!currentData.scored && currentData.xPos < currentBirdRect.x) {
                     currentData.scored = true;
-                    scoreProp.set(scoreProp.get() + 1);
+                    score.set(score.get() + 1);
                 }
                 pipeDataStateSlotPtr->value = currentData;  // Update the pipe's state
             }
@@ -296,24 +294,18 @@ NodePtr Text(
     auto node = std::make_shared<Node>();
 
     useRender(*node, [font, color, text, position, isVisible](SDL_Renderer* renderer) {
-        auto currentIsVisible = getVal(isVisible);
-        if (!currentIsVisible) {
+        if (!val(isVisible)) {
             return;
         }
 
-        auto currentText = getVal(text);
-        if (currentText.empty()) {
+        if (val(text).empty()) {
             return;
         }
 
-        auto currentPosition = getVal(position);
+        auto currentPosition = val(position);
 
-        SDL_Surface* surface = TTF_RenderText_Solid(
-            getVal(font),
-            currentText.c_str(),
-            currentText.length(),
-            getVal(color)
-        );
+        SDL_Surface* surface =
+            TTF_RenderText_Solid(val(font), val(text).c_str(), val(text).length(), val(color));
         if (!surface) {
             SDL_LogWarn(
                 SDL_LOG_CATEGORY_APPLICATION,
@@ -349,116 +341,87 @@ NodePtr Text(
 }
 
 NodePtr Game(TTF_Font* font) {
-    auto gameNode = std::make_shared<Node>(nullptr);
+    auto node = std::make_shared<Node>(nullptr);
 
-    // Individual states for game data
-    auto statusState = useState<GameStatus>(*gameNode, GameStatus::MainMenu);
-    auto scoreState = useState<int>(*gameNode, 0);
-    auto birdRectState = useState<SDL_FRect>(
-        *gameNode,
+    auto status = useState<GameStatus>(*node, GameStatus::MainMenu);
+    auto score = useState<int>(*node, 0);
+    auto birdRect = useState<SDL_FRect>(
+        *node,
         {
             BIRD_X_POSITION - BIRD_WIDTH / 2,
             WINDOW_HEIGHT / 2.0f - BIRD_HEIGHT / 2,
             BIRD_WIDTH,
             BIRD_HEIGHT,
         }
-    ); 
-    auto gameOverFlagState = useState<bool>(*gameNode, false);
-    // This state will hold the callback provided by the Bird component
-    auto onFlapRequestedCallbackState = useState<std::function<void()>>(*gameNode, nullptr);
+    );
 
-    // Game logic update
-    useUpdate(*gameNode, [statusState, gameOverFlagState](double /*dt*/) mutable {
-        if (gameOverFlagState.get() && statusState.get() == GameStatus::Playing) {
-            statusState.set(GameStatus::GameOver);
-            // gameOverFlagState is reset when transitioning to MainMenu or Playing
-        }
-    });
-
-    useEvent(
-        *gameNode,
-        [statusState, scoreState, gameOverFlagState, onFlapRequestedCallbackState](
-            SDL_Event* e
-        ) mutable {
-            if (e->type == SDL_EVENT_KEY_DOWN) {
-                if (e->key.scancode == SDL_SCANCODE_SPACE || e->key.scancode == SDL_SCANCODE_UP) {
-                    GameStatus currentStatus = statusState.get();
-                    if (currentStatus == GameStatus::MainMenu) {
-                        statusState.set(GameStatus::Playing);
-                        scoreState.set(0);
-                        gameOverFlagState.set(false);  // Reset game over flag
-                    } else if (currentStatus == GameStatus::Playing) {
-                        auto flapCb = onFlapRequestedCallbackState.get();
-                        if (flapCb) {
-                            flapCb();
-                        }
-                    } else if (currentStatus == GameStatus::GameOver) {
-                        statusState.set(GameStatus::MainMenu);
-                        scoreState.set(0);
-                        gameOverFlagState.set(false);  // Reset game over flag
-                    }
+    useEvent(*node, [status, score](SDL_Event* e) mutable {
+        if (e->type == SDL_EVENT_KEY_DOWN) {
+            if (e->key.scancode == SDL_SCANCODE_SPACE || e->key.scancode == SDL_SCANCODE_UP) {
+                GameStatus currentStatus = status.get();
+                if (currentStatus == GameStatus::MainMenu) {
+                    status.set(GameStatus::Playing);
+                    score.set(0);
+                } else if (currentStatus == GameStatus::GameOver) {
+                    status.set(GameStatus::MainMenu);
+                    score.set(0);
                 }
             }
         }
-    );
+    });
 
     // --- UI Text Elements ---
     SDL_Color textColor = {0, 0, 0, 255};                     // Black text
     SDL_FPoint scorePosition = {WINDOW_WIDTH / 2.0f, 50.0f};  // Fixed position for score
 
     // Create children by passing the states
-    auto birdNode =
-        Bird(statusState, birdRectState, gameOverFlagState, onFlapRequestedCallbackState);
-    auto pipeManagerNode = PipeManager(statusState, birdRectState, scoreState, gameOverFlagState);
+    auto birdNode = Bird(status, birdRect);
+    auto pipeManagerNode = PipeManager(status, birdRect, score);
 
-    gameNode->SetChildren({
+    node->SetChildren({
         birdNode,
         pipeManagerNode,
         Text(
             font,
             textColor,
-            [statusState, scoreState]() -> std::string {  // Text provider
-                GameStatus status = statusState.get();
-                int currentScore = scoreState.get();
-                if (status == GameStatus::MainMenu) {
+            [status, score]() -> std::string {
+                if (status.get() == GameStatus::MainMenu) {
                     return "Flap to Start";
-                } else if (status == GameStatus::GameOver) {
-                    return "Game Over! Score: " + std::to_string(currentScore) + ".";
+                } else if (status.get() == GameStatus::GameOver) {
+                    return "Game Over! Score: " + std::to_string(score.get()) + ".";
                 }
-                return "";  // Empty if no message for current state
+                return "";
             },
-            [statusState]() -> SDL_FPoint {  // Position provider
-                GameStatus status = statusState.get();
-                if (status == GameStatus::GameOver) {
+            [status]() -> SDL_FPoint {  // Position provider
+                if (status.get() == GameStatus::GameOver) {
                     return {WINDOW_WIDTH / 2.0f, WINDOW_HEIGHT / 2.0f - 25.0f};
                 }
                 // Default position for main menu message
                 return {WINDOW_WIDTH / 2.0f, 100.0f};
             },
-            [statusState]() -> bool {  // Visibility provider
-                GameStatus status = statusState.get();
-                return status == GameStatus::MainMenu || status == GameStatus::GameOver;
+            [status]() -> bool {  // Visibility provider
+                return status.get() == GameStatus::MainMenu || status.get() == GameStatus::GameOver;
             }
         ),
         Text(
             font,
             textColor,
-            [statusState, scoreState]() -> std::string {  // Text provider
-                if (statusState.get() == GameStatus::Playing) {
-                    return "Score: " + std::to_string(scoreState.get());
+            [status, score]() -> std::string {  // Text provider
+                if (status.get() == GameStatus::Playing) {
+                    return "Score: " + std::to_string(score.get());
                 }
                 return "";  // Don't show score text if not playing or game over
             },
             [scorePosition]() -> SDL_FPoint {  // Position provider (fixed for score)
                 return scorePosition;
             },
-            [statusState]() -> bool {  // Visibility provider
-                return statusState.get() == GameStatus::Playing;
+            [status]() -> bool {  // Visibility provider
+                return status.get() == GameStatus::Playing;
             }
         ),
     });
 
-    return gameNode;
+    return node;
 }
 
 //------------------------------------------------------------------------------
